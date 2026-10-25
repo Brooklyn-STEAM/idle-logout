@@ -6,7 +6,7 @@ A clock icon in the system tray shows the app is running. Hover over it to see t
 
 ## Install
 
-Download `idle-logout-setup.exe` from the latest release and run it as an administrator. It picks the x64 or ARM64 build for the PC and starts the app at sign-in for every user.
+Download `idle-logout-setup.exe` from the latest release and run it as an administrator. It picks the x64 or ARM64 build for the PC and installs an "Idle Logout" service. The service runs as SYSTEM and starts the app in every signed-in session. If a user closes the app, the service starts it again within a few seconds. Users who aren't administrators can't stop the service.
 
 ## Settings
 

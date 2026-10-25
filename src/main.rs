@@ -7,6 +7,9 @@ use gpui_kit::*;
 use std::borrow::Cow;
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
+mod service;
+
 const PANEL: Size<Pixels> = size(px(560.), px(152.));
 
 // Brooklyn STEAM Center design system tokens (light theme).
@@ -295,6 +298,10 @@ fn open_panel(remaining: Duration, total: Duration, dry_run: bool, cx: &mut App)
 }
 
 fn main() {
+    #[cfg(windows)]
+    if std::env::args().any(|a| a == "--service") {
+        return service::run();
+    }
     let dry_run = std::env::args().any(|a| a == "--dry-run");
     let (idle_after, countdown) = if dry_run {
         (Duration::from_secs(5), Duration::from_secs(10))
