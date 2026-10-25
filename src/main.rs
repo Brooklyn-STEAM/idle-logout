@@ -157,6 +157,7 @@ impl Render for Panel {
                                 .font_family(DISPLAY)
                                 .text_size(px(20.))
                                 .w_full()
+                                .cursor_pointer()
                                 .label("SIGN OUT")
                                 .on_click(move |_, _, cx| {
                                     log_out(dry_run);
@@ -173,6 +174,7 @@ impl Render for Panel {
                                 .font_family(DISPLAY)
                                 .text_size(px(20.))
                                 .w_full()
+                                .cursor_pointer()
                                 .label("STAY SIGNED IN")
                                 .on_click(cx.listener(|p, _, _, _| p.stay = true)),
                         ),
@@ -263,7 +265,7 @@ fn main() {
                                 cx.notify();
                             }),
                             None => {
-                                panel = open_panel(remaining, countdown, dry_run, cx).map(|(w, v)| (w, v, Instant::now()))
+                                panel = open_panel(remaining, countdown, dry_run, cx).map(|(w, v)| (w, v, Instant::now()));
                             }
                         },
                         Phase::Logout => {
