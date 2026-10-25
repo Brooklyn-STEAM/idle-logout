@@ -90,6 +90,43 @@ fn tray() -> Option<()> {
     None
 }
 
+// Machine-wide only (HKLM), so admins or Group Policy set it and users can't override it.
+#[cfg(windows)]
+fn config_secs(name: &str, default: u64) -> Duration {
+    use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RegGetValueW};
+    let wide = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let (mut value, mut size) = (0u32, size_of::<u32>() as u32);
+    let found = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            wide(r"Software\Idle Logout").as_ptr(),
+            wide(name).as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&raw mut value).cast(),
+            &mut size,
+        )
+    } == 0;
+    // 0 would sign people out instantly, so treat it like a missing value.
+    Duration::from_secs(if found && value > 0 { value as u64 } else { default })
+}
+
+#[cfg(not(windows))]
+fn config_secs(_: &str, default: u64) -> Duration {
+    Duration::from_secs(default)
+}
+
+// The system's own notification sound, so it follows the user's sound scheme and mute.
+#[cfg(windows)]
+fn chime() {
+    use windows_sys::Win32::System::Diagnostics::Debug::MessageBeep;
+    use windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONINFORMATION;
+    unsafe { MessageBeep(MB_ICONINFORMATION) };
+}
+
+#[cfg(not(windows))]
+fn chime() {}
+
 fn log_out(dry_run: bool) {
     if dry_run {
         println!("would log out now");
@@ -219,7 +256,7 @@ fn main() {
     let (idle_after, countdown) = if dry_run {
         (Duration::from_secs(5), Duration::from_secs(10))
     } else {
-        (Duration::from_secs(60), Duration::from_secs(240))
+        (config_secs("IdleSeconds", 60), config_secs("CountdownSeconds", 240))
     };
     let started = Instant::now();
 
@@ -266,6 +303,7 @@ fn main() {
                             }),
                             None => {
                                 panel = open_panel(remaining, countdown, dry_run, cx).map(|(w, v)| (w, v, Instant::now()));
+                                chime();
                             }
                         },
                         Phase::Logout => {

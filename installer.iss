@@ -28,6 +28,9 @@ Source: "idle-logout-x64.exe"; DestDir: "{app}"; DestName: "idle-logout.exe"; Ch
 [Registry]
 ; Starts for every user at sign-in.
 Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Idle Logout"; ValueData: """{app}\idle-logout.exe"""; Flags: uninsdeletevalue
+; Settings, in seconds; read at startup. Created with the defaults so admins can find them, and left alone on upgrade.
+Root: HKLM; Subkey: "Software\Idle Logout"; ValueType: dword; ValueName: "IdleSeconds"; ValueData: "60"; Flags: createvalueifdoesntexist uninsdeletekey
+Root: HKLM; Subkey: "Software\Idle Logout"; ValueType: dword; ValueName: "CountdownSeconds"; ValueData: "240"; Flags: createvalueifdoesntexist uninsdeletekey
 
 [Run]
 Filename: "{app}\idle-logout.exe"; Flags: nowait postinstall skipifsilent runasoriginaluser; Description: "Start Idle Logout now"
