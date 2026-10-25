@@ -68,20 +68,43 @@ fn tray() -> Option<tray_icon::TrayIcon> {
     let label = concat!("Idle Logout v", env!("CARGO_PKG_VERSION"));
     let menu = Menu::new();
     menu.append(&MenuItem::new(label, false, None)).ok()?;
-    // Brand-blue dot, drawn here so no icon file needs bundling.
-    let rgba = (0..32 * 32)
-        .flat_map(|i| {
-            let (x, y) = ((i % 32) as f32 - 15.5, (i / 32) as f32 - 15.5);
-            [0x00, 0x4b, 0xb6, if x * x + y * y <= 15.5 * 15.5 { 255 } else { 0 }]
-        })
-        .collect();
     tray_icon::TrayIconBuilder::new()
         .with_tooltip(label)
         .with_menu(Box::new(menu))
-        .with_icon(tray_icon::Icon::from_rgba(rgba, 32, 32).ok()?)
+        .with_icon(tray_icon::Icon::from_rgba(clock_rgba(32), 32, 32).ok()?)
         .build()
         .inspect_err(|e| eprintln!("could not add tray icon: {e}"))
         .ok()
+}
+
+// White clock hands on a brand-blue disc, drawn here so no icon file needs bundling.
+// Laid out on a 24-unit grid like the brand's Lucide icons, with 4x4 supersampling for smooth edges.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn clock_rgba(size: u32) -> Vec<u8> {
+    // Distance from p to the hand running from the centre (12, 12) to end.
+    let hand = |p: (f32, f32), end: (f32, f32)| {
+        let (dx, dy) = (end.0 - 12., end.1 - 12.);
+        let t = (((p.0 - 12.) * dx + (p.1 - 12.) * dy) / (dx * dx + dy * dy)).clamp(0., 1.);
+        (p.0 - 12. - t * dx).hypot(p.1 - 12. - t * dy)
+    };
+    let unit = 24. / size as f32;
+    let mut rgba = Vec::with_capacity((size * size * 4) as usize);
+    for i in 0..size * size {
+        let (mut disc, mut white) = (0., 0.);
+        for s in 0..16 {
+            let x = ((i % size) as f32 + (s % 4) as f32 / 4. + 0.125) * unit;
+            let y = ((i / size) as f32 + (s / 4) as f32 / 4. + 0.125) * unit;
+            if (x - 12.).hypot(y - 12.) <= 12. {
+                disc += 1. / 16.;
+                if hand((x, y), (12., 5.5)) <= 1.4 || hand((x, y), (16.5, 14.5)) <= 1.4 {
+                    white += 1. / 16.;
+                }
+            }
+        }
+        let mix = |c: u8| (c as f32 + (255. - c as f32) * if disc > 0. { white / disc } else { 0. }) as u8;
+        rgba.extend([mix(0x00), mix(0x4b), mix(0xb6), (disc * 255.) as u8]);
+    }
+    rgba
 }
 
 // shortcut: tray only on Windows; tray-icon needs GTK elsewhere, add it if the UI preview needs one.
@@ -322,8 +345,16 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{phase, Phase};
+    use super::{clock_rgba, phase, Phase};
     use std::time::Duration;
+
+    #[test]
+    fn clock_icon() {
+        let px = |x: usize, y: usize| clock_rgba(32)[(y * 32 + x) * 4..][..4].to_vec();
+        assert_eq!(px(0, 0)[3], 0, "corner is transparent");
+        assert_eq!(px(16, 16), [255, 255, 255, 255], "hands meet white at the centre");
+        assert_eq!(px(5, 16), [0x00, 0x4b, 0xb6, 255], "face is brand blue");
+    }
 
     #[test]
     fn phases() {
