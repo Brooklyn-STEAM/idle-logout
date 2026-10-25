@@ -3319,6 +3319,7 @@ name = "idle-logout"
 version = "0.1.0"
 dependencies = [
  "gpui-kit",
+ "raw-window-handle",
  "tray-icon",
  "windows-sys 0.61.2",
 ]

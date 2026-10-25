@@ -139,6 +139,25 @@ fn config_secs(_: &str, default: u64) -> Duration {
     Duration::from_secs(default)
 }
 
+// Windows 11 draws a 1px border around every window, which shows past the card's rounded corners.
+#[cfg(windows)]
+fn hide_frame(window: &impl raw_window_handle::HasWindowHandle) {
+    use raw_window_handle::RawWindowHandle;
+    use windows_sys::Win32::Graphics::Dwm::{
+        DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DwmSetWindowAttribute,
+    };
+    let Ok(handle) = window.window_handle() else { return };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else { return };
+    let hwnd = handle.hwnd.get() as _;
+    unsafe {
+        DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR as _, std::ptr::from_ref(&DWMWA_COLOR_NONE).cast(), 4);
+        DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE as _, std::ptr::from_ref(&DWMWCP_DONOTROUND).cast(), 4);
+    }
+}
+
+#[cfg(not(windows))]
+fn hide_frame(_: &Window) {}
+
 // The system's own notification sound, so it follows the user's sound scheme and mute.
 #[cfg(windows)]
 fn chime() {
@@ -267,6 +286,7 @@ fn open_panel(remaining: Duration, total: Duration, dry_run: bool, cx: &mut App)
     };
     open_window(options, cx, |window, cx| {
         // Windows won't let a background app take the foreground from `focus` alone; this forces it.
+        hide_frame(window);
         window.activate_window();
         cx.new(|_| Panel { remaining, total, dry_run, stay: false })
     })
