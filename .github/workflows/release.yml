@@ -13,12 +13,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - run: cargo build --release
+      - run: rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc
+
+      # - uses: Swatinem/rust-cache@v2
+
+      - run: cargo build --release --target x86_64-pc-windows-msvc --target aarch64-pc-windows-msvc
 
       - name: Publish release for the pushed tag
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" target/release/idle-logout.exe \
+          cp target/x86_64-pc-windows-msvc/release/idle-logout.exe idle-logout-x64.exe
+          cp target/aarch64-pc-windows-msvc/release/idle-logout.exe idle-logout-arm64.exe
+          gh release create "$GITHUB_REF_NAME" idle-logout-x64.exe idle-logout-arm64.exe \
             --title "$GITHUB_REF_NAME" --latest --generate-notes
