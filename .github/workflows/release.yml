@@ -35,8 +35,8 @@ jobs:
         run: |
           cp target/x86_64-pc-windows-msvc/release/idle-logout.exe idle-logout-x64.exe
           cp target/aarch64-pc-windows-msvc/release/idle-logout.exe idle-logout-arm64.exe
-          choco install innosetup -y --no-progress
-          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "/DAppVersion=$(cargo pkgid | sed 's/.*[#@]//')" installer.iss
+          # Inno Setup is preinstalled on the runner. MSYS_NO_PATHCONV stops Git Bash rewriting /D... into a file path.
+          MSYS_NO_PATHCONV=1 "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "/DAppVersion=$(cargo pkgid | sed 's/.*[#@]//')" installer.iss
 
       - name: Publish release for the pushed tag
         if: startsWith(github.ref, 'refs/tags/')
