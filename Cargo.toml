@@ -8,3 +8,4 @@ gpui-kit = "0.8.0"
 
 [target."cfg(windows)".dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation"] }
+tray-icon = "0.26.1"

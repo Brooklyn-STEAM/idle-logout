@@ -32,13 +32,13 @@ enum Phase {
     Logout,
 }
 
-fn phase(idle: Duration, idle_after: Duration, countdown: Duration) -> Phase {
-    if idle < idle_after {
-        Phase::Hidden
-    } else if idle < idle_after + countdown {
-        Phase::Countdown(idle_after + countdown - idle)
-    } else {
-        Phase::Logout
+// Once shown, the countdown ignores activity; only "Stay signed in" stops it.
+fn phase(idle: Duration, shown_for: Option<Duration>, idle_after: Duration, countdown: Duration) -> Phase {
+    match shown_for {
+        None if idle < idle_after => Phase::Hidden,
+        None => Phase::Countdown(countdown),
+        Some(shown) if shown < countdown => Phase::Countdown(countdown - shown),
+        Some(_) => Phase::Logout,
     }
 }
 
@@ -62,6 +62,34 @@ fn idle_time(started: Instant) -> Duration {
     started.elapsed()
 }
 
+#[cfg(windows)]
+fn tray() -> Option<tray_icon::TrayIcon> {
+    use tray_icon::menu::{Menu, MenuItem};
+    let label = concat!("Idle Logout v", env!("CARGO_PKG_VERSION"));
+    let menu = Menu::new();
+    menu.append(&MenuItem::new(label, false, None)).ok()?;
+    // Brand-blue dot, drawn here so no icon file needs bundling.
+    let rgba = (0..32 * 32)
+        .flat_map(|i| {
+            let (x, y) = ((i % 32) as f32 - 15.5, (i / 32) as f32 - 15.5);
+            [0x00, 0x4b, 0xb6, if x * x + y * y <= 15.5 * 15.5 { 255 } else { 0 }]
+        })
+        .collect();
+    tray_icon::TrayIconBuilder::new()
+        .with_tooltip(label)
+        .with_menu(Box::new(menu))
+        .with_icon(tray_icon::Icon::from_rgba(rgba, 32, 32).ok()?)
+        .build()
+        .inspect_err(|e| eprintln!("could not add tray icon: {e}"))
+        .ok()
+}
+
+// shortcut: tray only on Windows; tray-icon needs GTK elsewhere, add it if the UI preview needs one.
+#[cfg(not(windows))]
+fn tray() -> Option<()> {
+    None
+}
+
 fn log_out(dry_run: bool) {
     if dry_run {
         println!("would log out now");
@@ -74,10 +102,11 @@ struct Panel {
     remaining: Duration,
     total: Duration,
     dry_run: bool,
+    stay: bool,
 }
 
 impl Render for Panel {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let secs = self.remaining.as_secs_f32().ceil() as u64;
         let pct = 100. * self.remaining.as_secs_f32() / self.total.as_secs_f32();
         let dry_run = self.dry_run;
@@ -114,19 +143,39 @@ impl Render for Panel {
                         // display-lg countdown
                         .child(div().font_family(DISPLAY).text_size(px(48.)).line_height(px(52.)).text_color(rgb(BLACK)).child(format!("{}:{:02}", secs / 60, secs % 60)))
                         // body-sm helper
-                        .child(div().text_size(px(14.)).line_height(px(20.)).text_color(rgb(INK_MUTED)).child("Move the mouse or press a key to stay signed in.")),
+                        .child(div().text_size(px(14.)).line_height(px(20.)).text_color(rgb(INK_MUTED)).child("Still here? Choose to stay signed in.")),
                 )
                 .child(
-                    Button::new("now")
-                        .primary()
-                        .rounded(px(12.)) // radius-md
-                        .font_family(DISPLAY)
-                        .text_size(px(20.))
-                        .label("SIGN OUT")
-                        .on_click(move |_, _, cx| {
-                            log_out(dry_run);
-                            cx.quit();
-                        }),
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.)) // space-2
+                        .child(
+                            Button::new("now")
+                                .primary()
+                                .rounded(px(12.)) // radius-md
+                                .font_family(DISPLAY)
+                                .text_size(px(20.))
+                                .w_full()
+                                .label("SIGN OUT")
+                                .on_click(move |_, _, cx| {
+                                    log_out(dry_run);
+                                    cx.quit();
+                                }),
+                        )
+                        .child(
+                            Button::new("stay")
+                                .ghost()
+                                // Light brand tint so it reads as a button without competing with Sign out.
+                                .bg(blue.opacity(0.1))
+                                .text_color(blue)
+                                .rounded(px(12.)) // radius-md
+                                .font_family(DISPLAY)
+                                .text_size(px(20.))
+                                .w_full()
+                                .label("STAY SIGNED IN")
+                                .on_click(cx.listener(|p, _, _, _| p.stay = true)),
+                        ),
                 )
                 .with_animation(
                     "slide-in",
@@ -146,7 +195,7 @@ fn open_panel(remaining: Duration, total: Duration, dry_run: bool, cx: &mut App)
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::new(origin, PANEL))),
         titlebar: None,
-        focus: false,
+        focus: true,
         kind: WindowKind::PopUp,
         is_movable: false,
         is_resizable: false,
@@ -154,7 +203,11 @@ fn open_panel(remaining: Duration, total: Duration, dry_run: bool, cx: &mut App)
         window_background: WindowBackgroundAppearance::Transparent,
         ..Default::default()
     };
-    open_window(options, cx, |_, cx| cx.new(|_| Panel { remaining, total, dry_run }))
+    open_window(options, cx, |window, cx| {
+        // Windows won't let a background app take the foreground from `focus` alone; this forces it.
+        window.activate_window();
+        cx.new(|_| Panel { remaining, total, dry_run, stay: false })
+    })
         .inspect_err(|e| eprintln!("could not open panel: {e:#}"))
         .ok()
 }
@@ -186,23 +239,32 @@ fn main() {
             cx.text_system()
                 .add_fonts(vec![Cow::Borrowed(include_bytes!("../assets/Dosis-Regular.ttf"))])
                 .expect("bundled Dosis font loads");
+            // Created on the UI thread, whose message loop drives it; dropping it removes the icon.
+            let tray = tray();
             cx.spawn(async move |cx| {
-                let mut panel: Option<(AnyWindowHandle, Entity<Panel>)> = None;
+                let _tray = tray;
+                let mut panel: Option<(AnyWindowHandle, Entity<Panel>, Instant)> = None;
+                // Also counts as activity, so the idle clock restarts even where idle_time can't see input.
+                let mut stayed_at = started;
                 loop {
                     cx.background_executor().timer(Duration::from_millis(250)).await;
-                    let now = phase(idle_time(started), idle_after, countdown);
+                    let idle = idle_time(started).min(stayed_at.elapsed());
+                    let now = phase(idle, panel.as_ref().map(|(_, _, shown)| shown.elapsed()), idle_after, countdown);
                     cx.update(|cx| match now {
-                        Phase::Hidden => {
-                            if let Some((window, _)) = panel.take() {
-                                window.update(cx, |_, window, _| window.remove_window()).ok();
-                            }
-                        }
+                        Phase::Hidden => {}
                         Phase::Countdown(remaining) => match &panel {
-                            Some((_, view)) => view.update(cx, |p, cx| {
+                            Some((window, view, _)) if view.read(cx).stay => {
+                                window.update(cx, |_, window, _| window.remove_window()).ok();
+                                panel = None;
+                                stayed_at = Instant::now();
+                            }
+                            Some((_, view, _)) => view.update(cx, |p, cx| {
                                 p.remaining = remaining;
                                 cx.notify();
                             }),
-                            None => panel = open_panel(remaining, countdown, dry_run, cx),
+                            None => {
+                                panel = open_panel(remaining, countdown, dry_run, cx).map(|(w, v)| (w, v, Instant::now()))
+                            }
                         },
                         Phase::Logout => {
                             log_out(dry_run);
@@ -226,11 +288,13 @@ mod tests {
     #[test]
     fn phases() {
         let s = Duration::from_secs;
-        let p = |idle| phase(s(idle), s(60), s(240));
-        assert_eq!(p(0), Phase::Hidden);
-        assert_eq!(p(59), Phase::Hidden);
-        assert_eq!(p(60), Phase::Countdown(s(240)));
-        assert_eq!(p(299), Phase::Countdown(s(1)));
-        assert_eq!(p(300), Phase::Logout);
+        let p = |idle, shown: Option<u64>| phase(s(idle), shown.map(s), s(60), s(240));
+        assert_eq!(p(0, None), Phase::Hidden);
+        assert_eq!(p(59, None), Phase::Hidden);
+        assert_eq!(p(60, None), Phase::Countdown(s(240)));
+        // Activity after the panel shows doesn't stop the countdown.
+        assert_eq!(p(0, Some(10)), Phase::Countdown(s(230)));
+        assert_eq!(p(0, Some(239)), Phase::Countdown(s(1)));
+        assert_eq!(p(0, Some(240)), Phase::Logout);
     }
 }
