@@ -142,17 +142,25 @@ fn config_secs(_: &str, default: u64) -> Duration {
     Duration::from_secs(default)
 }
 
-// Windows 11 draws a 1px border around every window, which shows past the card's rounded corners.
+// gpui creates popups with style 0, which Windows treats as a captioned window: DWM then draws a
+// 1px top edge, a border and a square shadow outside the card's rounded corners. A bare WS_POPUP has none.
 #[cfg(windows)]
 fn hide_frame(window: &impl raw_window_handle::HasWindowHandle) {
     use raw_window_handle::RawWindowHandle;
     use windows_sys::Win32::Graphics::Dwm::{
         DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DwmSetWindowAttribute,
     };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GWL_STYLE, GetWindowLongPtrW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos,
+        WS_CAPTION, WS_POPUP, WS_THICKFRAME,
+    };
     let Ok(handle) = window.window_handle() else { return };
     let RawWindowHandle::Win32(handle) = handle.as_raw() else { return };
     let hwnd = handle.hwnd.get() as _;
     unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32 & !(WS_CAPTION | WS_THICKFRAME) | WS_POPUP;
+        SetWindowLongPtrW(hwnd, GWL_STYLE, style as _);
+        SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR as _, std::ptr::from_ref(&DWMWA_COLOR_NONE).cast(), 4);
         DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE as _, std::ptr::from_ref(&DWMWCP_DONOTROUND).cast(), 4);
     }
